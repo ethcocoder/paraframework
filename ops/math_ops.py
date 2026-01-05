@@ -427,3 +427,24 @@ class Sqrt(_Function):
         
         result_data = Sqrt.forward(ctx, x)
         return Tensor(result_data, requires_grad=should_track, _ctx=ctx)
+
+class Neg(_Function):
+    """Unary negation operation."""
+    @staticmethod
+    def forward(ctx, x):
+        return -x.data
+
+    def backward(self, grad_output):
+        return -grad_output
+
+    @staticmethod
+    def apply(x):
+        from modules.framework import autograd
+        should_track = autograd.is_grad_enabled() and x.requires_grad
+        ctx = Neg(x) if should_track else None
+        if ctx:
+            ctx.needs_input_grad = (x.requires_grad,)
+            ctx.parents = (x,)
+        
+        result_data = Neg.forward(ctx, x)
+        return Tensor(result_data, requires_grad=should_track, _ctx=ctx)

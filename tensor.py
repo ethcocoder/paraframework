@@ -171,6 +171,10 @@ class Tensor:
             return Tensor(other, device_type=self.device, requires_grad=False)
         return other
 
+    def __neg__(self):
+        from modules.framework.ops.math_ops import Neg
+        return Neg.apply(self)
+
     def __add__(self, other):
         from modules.framework.ops.math_ops import Add
         other = self._ensure_tensor(other)
