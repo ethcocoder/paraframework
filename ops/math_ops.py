@@ -95,6 +95,10 @@ class MatMul(_Function):
 
     @staticmethod
     def apply(a, b):
+        from modules.framework.tensor import Tensor
+        if not isinstance(a, Tensor): a = Tensor(a)
+        if not isinstance(b, Tensor): b = Tensor(b)
+        
         should_track = autograd.is_grad_enabled() and (a.requires_grad or b.requires_grad)
         ctx = MatMul(a, b) if should_track else None
         if ctx:
@@ -243,6 +247,13 @@ class Pow(_Function):
     def backward(self, grad_output):
         a_data, b = self.saved_tensors
         grad_a = grad_output * b * device.backend.power(a_data, b - 1)
+        
+        if len(self.parents) > 1:
+            # d/db a^b = a^b * log(a)
+            # We don't strictly need this for most transformer training, but for completeness:
+            grad_b = grad_output * device.backend.power(a_data, b) * device.backend.log(a_data)
+            return grad_a, grad_b
+            
         return (grad_a,)
 
     @staticmethod
@@ -349,16 +360,23 @@ class Transpose(_Function):
         if axes is None:
             grad_x = device.backend.transpose(grad)
         else:
-            inverse_axes = tuple(device.backend.argsort(axes))
+            # To invert a permutation, we argsort it
+            import numpy as np
+            inverse_axes = tuple(np.argsort(axes))
             grad_x = device.backend.transpose(grad, axes=inverse_axes)
-        return Tensor(grad_x)
+        return grad_x
 
     @staticmethod
     def apply(x, axes=None):
         should_track = autograd.is_grad_enabled() and x.requires_grad
         ctx = Transpose(x) if should_track else None
-        if ctx: ctx.needs_input_grad = (x.requires_grad,)
-        return Tensor(device.backend.transpose(x.data, axes=axes), requires_grad=should_track, _ctx=ctx)
+        if ctx: 
+            ctx.needs_input_grad = (x.requires_grad,)
+            result_data = Transpose.forward(ctx, x, axes)
+        else:
+            result_data = device.backend.transpose(x.data, axes=axes)
+            
+        return Tensor(result_data, requires_grad=should_track, _ctx=ctx)
 
 class Max(_Function):
     @staticmethod

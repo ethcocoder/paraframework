@@ -115,29 +115,56 @@ class Tensor:
             return
 
         if grad_output is None:
-            # For scalar output, grad_output is 1
             if self.data.size == 1:
-                grad_output = Tensor(device.backend.array(1.0, dtype=self.dtype), device_type=self.device)
+                grad_output = device.backend.array(1.0, dtype=self.dtype)
             else:
                 raise RuntimeError("grad_output must be specified for non-scalar tensors")
-
-        if self.grad is not None:
-            # Efficiently accumulate gradients
-            self.grad._data = self.grad._data + grad_output.data
         else:
-            self.grad = grad_output.astype(self.dtype) if grad_output.dtype != self.dtype else grad_output
+            grad_output = grad_output.data if isinstance(grad_output, Tensor) else grad_output
 
-        if self._ctx:
-            grads = self._ctx.backward(grad_output.data)
+        # 1. Build topological order
+        topo = []
+        visited = set()
+        def build_topo(v):
+            if not isinstance(v, Tensor):
+                return
+            if id(v) not in visited:
+                visited.add(id(v))
+                if v._ctx:
+                    for parent in v._ctx.parents:
+                        build_topo(parent)
+                topo.append(v)
+        build_topo(self)
+
+        # 2. Initialize gradients
+        self.grad = Tensor(grad_output, device_type=self.device, requires_grad=False)
+        
+        # 3. Go backwards through the topological order
+        for v in reversed(topo):
+            if v._ctx is None:
+                continue
+            
+            # Get the gradient of the current node
+            if v.grad is None:
+                continue
+                
+            # Call the backward function of the operation
+            grads = v._ctx.backward(v.grad.data)
             if not isinstance(grads, tuple):
                 grads = (grads,)
-
-            for i, parent in enumerate(self._ctx.parents):
+            
+            # Distribute gradients to parents
+            for i, parent in enumerate(v._ctx.parents):
                 if parent.requires_grad:
-                    if isinstance(grads[i], Tensor):
-                        parent.backward(grads[i])
+                    g = grads[i]
+                    # Ensure g is raw data
+                    g_data = g.data if isinstance(g, Tensor) else g
+                    
+                    if parent.grad is None:
+                        parent.grad = Tensor(device.backend.array(g_data, dtype=parent.dtype), 
+                                           device_type=parent.device, requires_grad=False)
                     else:
-                        parent.backward(Tensor(grads[i], device_type=parent.device))
+                        parent.grad._data = parent.grad._data + g_data
 
     def to(self, device_type):
         if device_type == self.device:
