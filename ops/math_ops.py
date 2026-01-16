@@ -1,6 +1,19 @@
 from modules.framework.tensor import Tensor, _Function
 from modules.framework.device import device
 from modules.framework import amp, autograd
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Try to import Numba accelerated operations
+try:
+    from ..numba_ops import matmul_numba, NUMBA_AVAILABLE
+    if NUMBA_AVAILABLE:
+        logger.info("[SPEED] Numba JIT acceleration enabled for math operations")
+except ImportError:
+    NUMBA_AVAILABLE = False
+    logger.warning("[SPEED] Numba not available, using NumPy/CuPy backend")
 
 class Add(_Function):
     @staticmethod
@@ -52,6 +65,13 @@ class MatMul(_Function):
     def forward(ctx, a, b):
         if ctx: ctx.save_for_backward(a.data, b.data)
         
+        # Numba acceleration
+        if NUMBA_AVAILABLE and isinstance(a.data, np.ndarray) and isinstance(b.data, np.ndarray):
+            # Ensure data is float32 for Numba, as it's often optimized for it
+            a_data_numba = a.data.astype(np.float32) if a.data.dtype != np.float32 else a.data
+            b_data_numba = b.data.astype(np.float32) if b.data.dtype != np.float32 else b.data
+            return matmul_numba(a_data_numba, b_data_numba)
+
         # AMP Support
         if amp.is_autocast_enabled():
              a_data = a.data

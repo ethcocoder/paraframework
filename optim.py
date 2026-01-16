@@ -7,6 +7,18 @@ sys.path.append(os.path.join(os.getcwd(), "paradma"))
 from modules.framework.tensor import Tensor
 from modules.framework.device import device
 import numpy as np # [PARADMA] Replacing Numpy
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Try to import Numba accelerated operations
+try:
+    from modules.framework.numba_ops import adam_step_numba, NUMBA_AVAILABLE
+    if NUMBA_AVAILABLE:
+        logger.info("[SPEED] Numba JIT acceleration enabled for optimizers")
+except ImportError:
+    NUMBA_AVAILABLE = False
+    logger.warning("[SPEED] Numba not available for optimizers, using NumPy")
 
 def clip_grad_norm_(parameters, max_norm, norm_type=2):
     """
@@ -93,7 +105,7 @@ class Optimizer:
         raise NotImplementedError
 
 class SGD(Optimizer):
-    def __init__(self, params, lr=0.01, momentum=0, weight_decay=0):
+    def __init__(self1, params, lr=0.01, momentum=0, weight_decay=0):
         defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay)
         super().__init__(params, defaults)
         
@@ -128,6 +140,12 @@ class SGD(Optimizer):
                          buf += d_p
                          d_p = buf
                 
+                if momentum == 0:
+                     # Accelerated C-Path
+                     from modules.framework.c_bridge import bridge
+                     bridge.sgd_step(p._data, d_p, lr, weight_decay)
+                     continue
+                
                 p._data -= lr * d_p
 
 class Adam(Optimizer):
@@ -151,23 +169,30 @@ class Adam(Optimizer):
                     continue
                 
                 grad = p.grad.data
-                state = self.state[id(p)]
+                param_state = self.state[id(p)]
                 
                 # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['exp_avg'] = xp.zeros_like(p.data) # m
-                    state['exp_avg_sq'] = xp.zeros_like(p.data) # v
+                if len(param_state) == 0:
+                    param_state['step'] = 0
+                    param_state['exp_avg'] = device.backend.zeros_like(p.data) # m
+                    param_state['exp_avg_sq'] = device.backend.zeros_like(p.data) # v
                 
-                # Increment step
-                state['step'] += 1
+                exp_avg, exp_avg_sq = param_state['exp_avg'], param_state['exp_avg_sq']
+                
+                param_state['step'] += 1
                 
                 # Weight Decay (AdamW style: decoupled)
                 # Perform decay on parameter BEFORE adaptation
                 if weight_decay != 0:
                     p._data -= lr * weight_decay * p.data
                 
-                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                # Use Numba if available (much faster!)
+                if NUMBA_AVAILABLE and isinstance(p.data, device.backend.ndarray):
+                    adam_step_numba(
+                        p._data, grad, exp_avg, exp_avg_sq,
+                        lr, beta1, beta2, eps, param_state['step']
+                    )
+                    continue
                 
                 # Decay
                 # m = beta1 * m + (1 - beta1) * grad
