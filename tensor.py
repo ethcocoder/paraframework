@@ -68,6 +68,13 @@ class Tensor:
     def __str__(self):
         return f"Tensor(data={self.data}, requires_grad={self.requires_grad})"
     
+    def __getitem__(self, item):
+        """Enable slicing and indexing on the tensor data."""
+        # For now, we return a new Tensor with the sliced data
+        # Ideally, we should create a Slice op for autograd
+        data = self._data[item]
+        return Tensor(data, device_type=self.device, requires_grad=self.requires_grad)
+    
     def mean(self, axis=None, keepdims=False):
         """Compute mean along specified axis."""
         data = self._data
