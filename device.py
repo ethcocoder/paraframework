@@ -19,8 +19,9 @@ class Device:
             
         self._current_device = 'cpu'
         try:
-            self._cpu_backend = __import__('paradma.paradma', fromlist=[''])
-            print("Paradma backend initialized for CPU.")
+            self._cpu_backend = __import__('numpy')
+            # Paradma uses numpy as its base execution engine
+            pass
         except ImportError:
             self._cpu_backend = __import__('numpy')
             print("Paradma not found. Falling back to Numpy.")
