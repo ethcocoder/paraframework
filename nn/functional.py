@@ -132,3 +132,38 @@ def cross_entropy(input, target, reduction='mean', ignore_index=-100):
     Combination of LogSoftmax and NLLLoss.
     """
     return nll_loss(log_softmax(input, axis=1), target, reduction, ignore_index)
+
+def mse_loss(input, target, reduction='mean'):
+    """
+    Mean Squared Error loss
+    """
+    if not isinstance(target, Tensor):
+        target = Tensor(target, device_type=input.device)
+    
+    diff = input - target
+    squared = diff * diff
+    
+    if reduction == 'mean':
+        return squared.mean()
+    elif reduction == 'sum':
+        return squared.sum()
+    else:
+        return squared
+
+def l1_loss(input, target, reduction='mean'):
+    """
+    L1 (Mean Absolute Error) loss
+    """
+    if not isinstance(target, Tensor):
+        target = Tensor(target, device_type=input.device)
+    
+    diff = input - target
+    absolute = diff.abs()
+    
+    if reduction == 'mean':
+        return absolute.mean()
+    elif reduction == 'sum':
+        return absolute.sum()
+    else:
+        return absolute
+

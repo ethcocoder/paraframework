@@ -21,3 +21,18 @@ class CrossEntropyLoss(_Loss):
 
     def forward(self, input, target):
         return F.cross_entropy(input, target, reduction=self.reduction, ignore_index=self.ignore_index)
+
+class MSELoss(_Loss):
+    def __init__(self, reduction='mean'):
+        super().__init__(reduction)
+    
+    def forward(self, input, target):
+        return F.mse_loss(input, target, reduction=self.reduction)
+
+class L1Loss(_Loss):
+    def __init__(self, reduction='mean'):
+        super().__init__(reduction)
+    
+    def forward(self, input, target):
+        return F.l1_loss(input, target, reduction=self.reduction)
+
