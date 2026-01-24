@@ -77,13 +77,14 @@ class Tensor:
     
     def mean(self, axis=None, keepdims=False):
         """Compute mean along specified axis."""
-        data = self._data
-        if hasattr(data, 'mean'):
-            result = data.mean(axis=axis, keepdims=keepdims)
-        else:
-            import numpy as np
-            result = np.mean(data, axis=axis, keepdims=keepdims)
-        return Tensor(result, requires_grad=self.requires_grad)
+        from modules.framework.ops.math_ops import Mean
+        return Mean.apply(self, axis=axis, keepdims=keepdims)
+
+    def var(self, axis=None, keepdims=False):
+        """Compute variance along specified axis."""
+        from modules.framework.ops.math_ops import Var
+        return Var.apply(self, axis=axis, keepdims=keepdims)
+
     
     def sqrt(self):
         """Compute element-wise square root."""
@@ -229,6 +230,19 @@ class Tensor:
         other = self._ensure_tensor(other)
         return Div.apply(self, other)
 
+    def __radd__(self, other):
+        return self + other
+
+    def __rsub__(self, other):
+        return (-self) + other
+
+    def __rmul__(self, other):
+        return self * other
+
+    def __rtruediv__(self, other):
+        return self._ensure_tensor(other) / self
+
+
     def __pow__(self, other):
         from modules.framework.ops.math_ops import Pow
         # For power, 'other' can be a scalar and doesn't need to be a Tensor for the backward pass to work correctly
@@ -297,3 +311,18 @@ class Tensor:
     def T(self):
         from modules.framework.ops.math_ops import Transpose
         return Transpose.apply(self)
+
+    def softmax(self, axis=-1):
+        """Compute softmax along specified axis."""
+        from modules.framework.nn import functional as F
+        return F.log_softmax(self, axis=axis).exp()
+
+    def abs(self):
+        """Compute absolute value."""
+        # Using simple forward/backward if Abs op doesn't exist, 
+        # or relying on numpy if just for forward. 
+        # Ideally should use Abs op. Assuming Abs op exists or using workaround.
+        data = self._data
+        if hasattr(data, 'abs'):
+            return Tensor(data.abs(), requires_grad=self.requires_grad)
+        return Tensor(np.abs(data), requires_grad=self.requires_grad)

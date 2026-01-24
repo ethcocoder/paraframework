@@ -486,3 +486,86 @@ class Neg(_Function):
         
         result_data = Neg.forward(ctx, x)
         return Tensor(result_data, requires_grad=should_track, _ctx=ctx)
+
+
+class Mean(_Function):
+    @staticmethod
+    def forward(ctx, x, axis=None, keepdims=False):
+        if ctx: ctx.save_for_backward(x.data.shape, axis, keepdims)
+        return device.backend.mean(x.data, axis=axis, keepdims=keepdims)
+
+    def backward(self, grad_output):
+        x_shape, axis, keepdims = self.saved_tensors
+        xp = device.backend
+        
+        # Calculate N (number of elements averaged)
+        if axis is None:
+            n = xp.prod(xp.array(x_shape))
+        elif isinstance(axis, int):
+            n = x_shape[axis]
+        else: # tuple of axes
+            n = 1
+            for a in axis:
+                n *= x_shape[a]
+        
+        if axis is None:
+            grad_x = xp.full(x_shape, grad_output / n)
+        else:
+            if not keepdims:
+                grad_output = xp.expand_dims(grad_output, axis=axis)
+            grad_x = xp.broadcast_to(grad_output / n, x_shape)
+            
+        return (grad_x,)
+
+    @staticmethod
+    def apply(x, axis=None, keepdims=False):
+        should_track = autograd.is_grad_enabled() and x.requires_grad
+        ctx = Mean(x) if should_track else None
+        if ctx:
+            ctx.needs_input_grad = (x.requires_grad,)
+            ctx.parents = (x,)
+            
+        result_data = Mean.forward(ctx, x, axis, keepdims)
+        return Tensor(result_data, requires_grad=should_track, _ctx=ctx)
+
+class Var(_Function):
+    @staticmethod
+    def forward(ctx, x, axis=None, keepdims=False):
+        # Var(x) = E[x^2] - E[x]^2
+        mean_x = device.backend.mean(x.data, axis=axis, keepdims=True)
+        diff = x.data - mean_x
+        var = device.backend.mean(diff * diff, axis=axis, keepdims=keepdims)
+        if ctx: ctx.save_for_backward(x.data, mean_x, axis, keepdims)
+        return var
+
+    def backward(self, grad_output):
+        x_data, mean_x, axis, keepdims = self.saved_tensors
+        xp = device.backend
+        
+        # Calculate N
+        if axis is None:
+            n = xp.prod(xp.array(x_data.shape))
+        elif isinstance(axis, int):
+            n = x_data.shape[axis]
+        else:
+            n = 1
+            for a in axis: n *= x_data.shape[a]
+            
+        if axis is not None and not keepdims:
+            grad_output = xp.expand_dims(grad_output, axis=axis)
+            
+        # dVar/dx = 2/N * (x - E[x])
+        grad_x = (2.0 / n) * (x_data - mean_x) * grad_output
+        return (grad_x,)
+
+    @staticmethod
+    def apply(x, axis=None, keepdims=False):
+        should_track = autograd.is_grad_enabled() and x.requires_grad
+        ctx = Var(x) if should_track else None
+        if ctx:
+            ctx.needs_input_grad = (x.requires_grad,)
+            ctx.parents = (x,)
+            
+        result_data = Var.forward(ctx, x, axis, keepdims)
+        return Tensor(result_data, requires_grad=should_track, _ctx=ctx)
+
