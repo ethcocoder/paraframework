@@ -204,11 +204,121 @@ class Adam(Optimizer):
                 exp_avg_sq += (1 - beta2) * (grad * grad)
                 
                 # Bias correction
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
+                bias_correction1 = 1 - beta1 ** param_state['step']
+                bias_correction2 = 1 - beta2 ** param_state['step']
                 
                 denom = (xp.sqrt(exp_avg_sq) / math.sqrt(bias_correction2)) + eps
                 
                 step_size = lr / bias_correction1
                 
                 p._data -= step_size * (exp_avg / denom)
+
+class Lion(Optimizer):
+    """
+    Implements Lion optimizer (Google's latest optimizer).
+    More memory efficient than Adam (only stores momentum, not second moment).
+    Paper: https://arxiv.org/abs/2302.06675
+    """
+    def __init__(self, params, lr=1e-4, betas=(0.9, 0.99), weight_decay=0):
+        defaults = dict(lr=lr, betas=betas, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+    
+    def step(self):
+        for group in self.param_groups:
+            lr = group['lr']
+            beta1, beta2 = group['betas']
+            weight_decay = group['weight_decay']
+            
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                grad = p.grad.data
+                param_state = self.state[id(p)]
+                
+                # State initialization
+                if len(param_state) == 0:
+                    param_state['exp_avg'] = device.backend.zeros_like(p.data)
+                
+                exp_avg = param_state['exp_avg']
+                
+                # Weight decay (decoupled)
+                if weight_decay != 0:
+                    p._data -= lr * weight_decay * p.data
+                
+                # Lion update
+                # c = sign(beta1 * m + (1 - beta1) * grad)
+                # m = beta2 * m + (1 - beta2) * grad
+                update = beta1 * exp_avg + (1 - beta1) * grad
+                sign_update = device.backend.sign(update)
+                p._data -= lr * sign_update
+                
+                # Update momentum
+                exp_avg *= beta2
+                exp_avg += (1 - beta2) * grad
+
+class Lamb(Optimizer):
+    """
+    Implements Lamb optimizer (Layer-wise Adaptive Moments optimizer for Batch training).
+    Particularly good for large batch sizes.
+    Paper: https://arxiv.org/abs/1904.00962
+    """
+    def __init__(self, params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0):
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+    
+    def step(self):
+        xp = device.backend
+        for group in self.param_groups:
+            lr = group['lr']
+            beta1, beta2 = group['betas']
+            eps = group['eps']
+            weight_decay = group['weight_decay']
+            
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                grad = p.grad.data
+                param_state = self.state[id(p)]
+                
+                # State initialization
+                if len(param_state) == 0:
+                    param_state['step'] = 0
+                    param_state['exp_avg'] = xp.zeros_like(p.data)
+                    param_state['exp_avg_sq'] = xp.zeros_like(p.data)
+                
+                exp_avg, exp_avg_sq = param_state['exp_avg'], param_state['exp_avg_sq']
+                param_state['step'] += 1
+                
+                # Adam step
+                exp_avg *= beta1
+                exp_avg += (1 - beta1) * grad
+                exp_avg_sq *= beta2
+                exp_avg_sq += (1 - beta2) * (grad * grad)
+                
+                bias_correction1 = 1 - beta1 ** param_state['step']
+                bias_correction2 = 1 - beta2 ** param_state['step']
+                
+                # Corrected moments
+                exp_avg_corrected = exp_avg / bias_correction1
+                exp_avg_sq_corrected = exp_avg_sq / bias_correction2
+                
+                # Adam ratio
+                adam_step = exp_avg_corrected / (xp.sqrt(exp_avg_sq_corrected) + eps)
+                
+                # Add weight decay to adam step
+                if weight_decay != 0:
+                    adam_step += weight_decay * p.data
+                
+                # Layer-wise adaptation
+                weight_norm = xp.linalg.norm(p.data)
+                adam_norm = xp.linalg.norm(adam_step)
+                
+                if weight_norm > 0 and adam_norm > 0:
+                    trust_ratio = weight_norm / adam_norm
+                else:
+                    trust_ratio = 1.0
+                
+                # Apply update with trust ratio
+                p._data -= lr * trust_ratio * adam_step
