@@ -132,3 +132,4 @@ trainer.dream(num_dreams=10)
 
 ## 📜 License
 Internal Paradox AI Framework. proprietary.
+powerd by ethco coders team
